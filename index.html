@@ -260,20 +260,23 @@
     </div>
 
     <script>
-        const API_KEY = "AIzaSyDSF270Y1VJf1fe4G8ZAuw7bOITbAlal74";
-        const MODEL_NAME = "gemini-2.0-flash";
+        const API_KEY = "AIzaSyDSF270Y1VJf1fe4G8ZAuw7bOITbAlal74"; // This should be your actual API key
+        const MODEL_NAME = "gemini-2.0-flash"; // Per instruction, not changing this
         const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=${API_KEY}`;
 
-        // The SYSTEM_INSTRUCTION_TEXT still asks the model to preserve raw list formatting, which Marked.js will then parse.
-        const SYSTEM_INSTRUCTION_TEXT = `“As an AI prompt engineer, your core responsibility is to refine user input into a clear, structured development prompt. Do not include general explanations or descriptions. Begin your output with a clear action phrase like ‘Create a’ or ‘Develop a’ to indicate prompt development.
+        const SYSTEM_INSTRUCTION_TEXT = `You are an AI assistant that transforms user ideas into structured development specifications.
+Your output should *be* the specification itself, not a description *of* the specification.
+Begin your output *directly* with an action phrase like "Create a" or "Develop a", followed by the type of application/tool and its name if provided by the user.
+For example, if the user provides: "IntelliPath Learning - An AI-powered tool that analyzes learning styles...", your output should start similar to: "Develop an AI-powered learning tool, IntelliPath Learning, that:".
+Do NOT use phrases like "Develop a prompt for...", "Here is a specification for...", or refer to the output as a "prompt" in the response. Your entire response is the specification.
 
-Key focus areas include:
-1. Core Functionality derivation based on user input.
-2. UI Elements specification based on user input.
-3. Feature identification based on user input.
-4. User Interface Design suggestion based on user input."
-
-.`
+Structure the specification to detail the following, based on the user's input:
+1. Core Functionality
+2. UI Elements
+3. Features
+4. User Interface Design suggestions
+Ensure the output is formatted clearly, using Markdown for lists, bolding, etc. Do not add any conversational intro or conclusion.
+`;
 
 
         const userInputEl = document.getElementById('userInput');
@@ -308,7 +311,7 @@ Key focus areas include:
 
 
         refineButtonEl.addEventListener('click', handleRefinePrompt);
-        copyButtonEl.addEventListener('click', copyToClipboard);
+        copyButtonEl.addEventListener('click', copyToClipboard); // Corrected this line
         pasteButtonEl.addEventListener('click', handlePaste);
         clearButtonEl.addEventListener('click', handleClear);
         
@@ -323,37 +326,42 @@ Key focus areas include:
             try {
                 const text = await navigator.clipboard.readText();
                 userInputEl.value = text;
+                 userInputEl.dispatchEvent(new Event('input')); // Ensure UI updates if needed
             } catch (err) {
                 console.error('Failed to paste:', err);
-                displayError("Failed to paste from clipboard");
+                displayError("Failed to paste from clipboard. Check browser permissions.");
             }
         }
         
         function handleClear() {
             userInputEl.value = '';
-            refinedPromptOutputEl.innerHTML = '';
+            refinedPromptOutputEl.innerHTML = ''; // Clear rendered HTML
             outputContainerEl.classList.add('hidden-output');
+            clearError(); // Also clear any existing errors
         }
         
         function copyToClipboard() {
-            const outputText = refinedPromptOutputEl.innerText;
-            navigator.clipboard.writeText(outputText)
+            const textToCopy = refinedPromptOutputEl.innerText || refinedPromptOutputEl.textContent; 
+            if (!textToCopy || !copyButtonEl) return;
+
+            navigator.clipboard.writeText(textToCopy)
                 .then(() => {
                     copyButtonEl.innerHTML = checkmarkIconSVG;
-                    copyButtonEl.classList.add('text-green-500');
+                    copyButtonEl.classList.add('text-green-500', 'animate-pulse-once');
+                    copyButtonEl.classList.remove('text-slate-600'); // Assuming default icon color is from slate
                     copyFeedbackEl.textContent = 'Copied!';
-                    copyFeedbackEl.classList.add('animate-pulse-once');
                     
                     setTimeout(() => {
                         copyButtonEl.innerHTML = copyIconSVG;
-                        copyButtonEl.classList.remove('text-green-500');
+                        copyButtonEl.classList.remove('text-green-500', 'animate-pulse-once');
+                        copyButtonEl.classList.add('text-slate-600'); // Revert to default icon color
                         copyFeedbackEl.textContent = '';
-                        copyFeedbackEl.classList.remove('animate-pulse-once');
                     }, 2000);
                 })
                 .catch(err => {
                     console.error('Failed to copy:', err);
                     copyFeedbackEl.textContent = 'Failed to copy';
+                     setTimeout(() => { copyFeedbackEl.textContent = ''; }, 2000);
                 });
         }
 
@@ -365,12 +373,12 @@ Key focus areas include:
             }
             setLoading(true);
             clearError();
-            outputContainerEl.classList.add('hidden-output');
+            outputContainerEl.classList.add('hidden-output'); // Hide until new content is ready
 
             const requestBody = {
               contents: [ { role: "user", parts: [{ text: userPrompt }] } ],
               systemInstruction: { parts: [{ text: SYSTEM_INSTRUCTION_TEXT }] },
-              generationConfig: { temperature: 0.3, topP: 0.95, topK: 64, maxOutputTokens: 1000 } // Increased for potentially longer HTML from Markdown
+              generationConfig: { temperature: 0.3, topP: 0.95, topK: 64, maxOutputTokens: 1000 } 
             };
             
             try {
@@ -380,30 +388,39 @@ Key focus areas include:
                     body: JSON.stringify(requestBody)
                 });
                 if (!response.ok) {
-                    const errorData = await response.json();
-                    let errMsg = `API Error: ${response.status} ${response.statusText}. ${errorData.error?.message || ''}`;
+                    const errorData = await response.json().catch(() => ({ error: { message: "Could not parse error response from API." } })); // Graceful error parsing
+                    let errMsg = `API Error: ${response.status} ${response.statusText}. `;
+                    errMsg += errorData.error?.message || 'No additional error message from API.';
+                    
                     if (errorData.error?.message.includes("API key not valid")) errMsg += " Verify API key permissions.";
-                    else if (errorData.error?.message.toLowerCase().includes("model not found")) errMsg += ` Model '${MODEL_NAME}' incorrect/inaccessible. Try 'gemini-1.5-flash-latest'.`;
+                    else if (errorData.error?.message.toLowerCase().includes("model not found")) errMsg += ` Model '${MODEL_NAME}' incorrect/inaccessible. Try 'gemini-1.5-flash-latest' if issues persist with current model or check model availability.`;
                     else if (response.status === 400 && errorData.error?.message.includes("User location is not supported")) errMsg += " API not available in your region.";
+                    else if (response.status === 403) errMsg += " Forbidden. Check API key permissions or project settings.";
+
                     throw new Error(errMsg);
                 }
                 const data = await response.json();
+
                 if (data.candidates?.[0]?.content?.parts?.[0]?.text) {
                     const rawText = data.candidates[0].content.parts[0].text.trim();
-                    // Parse the raw text as Markdown and set it as HTML
-                    refinedPromptOutputEl.innerHTML = marked.parse(rawText);
+                    refinedPromptOutputEl.innerHTML = marked.parse(rawText); // Use Marked.js to parse and render
                     outputContainerEl.classList.remove('hidden-output');
                 } else if (data.promptFeedback?.blockReason) {
-                    let reason = `Prompt blocked: ${data.promptFeedback.blockReason}.`;
-                    data.promptFeedback.safetyRatings?.forEach(r => { if (r.blocked) reason += ` Cat: ${r.category}, Prob: ${r.probability}.`; });
+                    let reason = `Prompt blocked due to: ${data.promptFeedback.blockReason}.`;
+                    if(data.promptFeedback.safetyRatings?.length) {
+                        reason += " Safety concerns: ";
+                        data.promptFeedback.safetyRatings.forEach(r => { 
+                            if (r.blocked) reason += `Category ${r.category} (Probability: ${r.probability}). `; 
+                        });
+                    }
                     displayError(reason);
                 } else {
                     console.error('Unexpected API response structure:', data);
-                    displayError("Unexpected API response. Check console.");
+                    displayError("Received an unexpected response from the API. Please check the console for details.");
                 }
             } catch (error) {
-                console.error('Fetch error:', error);
-                displayError(error.message || "Unknown error. Check console.");
+                console.error('Fetch error details:', error);
+                displayError(error.message || "An unknown error occurred. Check the console for more information.");
             } finally {
                 setLoading(false);
             }
@@ -428,48 +445,9 @@ Key focus areas include:
             errorDisplayEl.classList.remove('flex');
         }
 
-        async function handlePaste() {
-            try {
-                const text = await navigator.clipboard.readText();
-                userInputEl.value = text;
-            } catch (err) {
-                console.error('Failed to paste:', err);
-                displayError("Failed to paste from clipboard");
-            }
-        }
-        
-        function handleClear() {
-            userInputEl.value = '';
-            refinedPromptOutputEl.innerHTML = '';
-            outputContainerEl.classList.add('hidden-output');
-        }
-        
-        function copyToClipboard() {
-            // For copying HTML content, it's better to get the raw text or specifically formatted text.
-            // For now, let's copy the innerText of the rendered HTML, which should be reasonably close.
-            // A more advanced approach might involve storing the raw API response separately for copying.
-            const textToCopy = refinedPromptOutputEl.innerText || refinedPromptOutputEl.textContent; 
-            if (!textToCopy || !copyButtonEl) return;
-
-            navigator.clipboard.writeText(textToCopy)
-                .then(() => {
-                    copyFeedbackEl.textContent = 'Copied!';
-                    copyButtonEl.innerHTML = checkmarkIconSVG;
-                    copyButtonEl.classList.add('text-green-500', 'animate-pulse-once');
-                    copyButtonEl.classList.remove('text-slate-600'); 
-
-                    setTimeout(() => {
-                        copyFeedbackEl.textContent = '';
-                        copyButtonEl.innerHTML = copyIconSVG;
-                        copyButtonEl.classList.remove('text-green-500', 'animate-pulse-once');
-                        copyButtonEl.classList.add('text-slate-600'); 
-                    }, 2500);
-                })
-                .catch(err => {
-                    console.error('Failed to copy text: ', err);
-                    copyFeedbackEl.textContent = 'Copy Failed!';
-                });
-        }
+        // The duplicate handlePaste and handleClear functions were removed.
+        // The duplicate copyToClipboard function was also removed.
+        // Ensured the event listener for copyButton uses the correct function name.
     </script>
 </body>
 </html>
